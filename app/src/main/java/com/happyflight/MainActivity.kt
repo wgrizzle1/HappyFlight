@@ -1,289 +1,286 @@
 package com.happyflight
 
-import android.os.Bundle
-import com.google.android.material.bottomnavigation.BottomNavigationView
-import androidx.appcompat.app.AppCompatActivity
-import androidx.navigation.findNavController
-import androidx.navigation.ui.AppBarConfiguration
-import androidx.navigation.ui.setupActionBarWithNavController
-import androidx.navigation.ui.setupWithNavController
-import com.happyflight.databinding.ActivityMainBinding
-//custom imports
-import androidx.activity.result.ActivityResultLauncher
-import androidx.activity.result.contract.ActivityResultContracts
-import android.content.pm.PackageManager
 import android.Manifest
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.content.pm.PackageManager
+import android.os.Build
+import android.os.Bundle
 import android.widget.Button
 import android.widget.EditText
+import android.widget.Toast
+import android.view.View
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import com.google.android.gms.location.FusedLocationProviderClient
 import com.google.android.gms.location.LocationServices
-import android.widget.Toast
-import androidx.navigation.fragment.NavHostFragment
-import android.content.Context
-import android.content.ClipboardManager
-import android.content.ClipData
-import org.chromium.net.CronetEngine
-import org.chromium.net.UrlRequest
-import org.chromium.net.UrlResponseInfo
-import org.chromium.net.CronetException
-import java.util.concurrent.Executor
-import java.util.concurrent.Executors
-import java.nio.ByteBuffer
-import org.json.JSONObject
-import java.nio.charset.Charset
-import kotlin.math.*
-import android.os.Handler
-import android.os.Looper
+import com.google.android.material.bottomsheet.BottomSheetDialog
+import android.widget.TextView
+import androidx.localbroadcastmanager.content.LocalBroadcastManager
+import org.json.JSONArray
+import com.happyflight.Flight
+
 
 class MainActivity : AppCompatActivity() {
 
-    private lateinit var binding: ActivityMainBinding
     private lateinit var fusedLocationClient: FusedLocationProviderClient
+    private lateinit var radiusInput: EditText
+    private lateinit var trackedFlightsButton: Button
 
+    // Declare the BroadcastReceiver at the class level
+    private lateinit var planeUpdateReceiver: BroadcastReceiver
+
+    companion object {
+        const val LOCATION_PERMISSION_REQUEST_CODE = 1
+        const val NOTIFICATION_PERMISSION_REQUEST_CODE = 2
+        const val PLANE_UPDATE_ACTION = "com.happyflight.PLANE_UPDATE" // Ensure consistency here
+        const val TRACKED_FLIGHTS_UPDATE_ACTION = "com.happyflight.TRACKED_FLIGHTS_UPDATE"
+
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        binding = ActivityMainBinding.inflate(layoutInflater)
-
         setContentView(R.layout.activity_main)
 
-        val myBuilder = CronetEngine.Builder(this)
-        val cronetEngine: CronetEngine = myBuilder.build()
-
-
-
-        // Get the NavController
-        val navHostFragment = supportFragmentManager.findFragmentById(R.id.nav_host_fragment) as NavHostFragment
-        val navController = navHostFragment.navController
-
-
-        // Passing each menu ID as a set of Ids because each
-        // menu should be considered as top level destinations.
-
-        // Initialize the location client
-
+        // Initialize Location Services
         fusedLocationClient = LocationServices.getFusedLocationProviderClient(this)
 
-        // Check if the permission is already granted, else request it
-        if (ActivityCompat.checkSelfPermission(
-                this, Manifest.permission.ACCESS_FINE_LOCATION
-            ) == PackageManager.PERMISSION_GRANTED) {
-        } else {
-            requestLocationPermission()
+        // Set up the radius input and buttons
+        radiusInput = findViewById(R.id.radiusInput)
+        val startTrackingButton = findViewById<Button>(R.id.startTrackingButton)
+        val stopTrackingButton = findViewById<Button>(R.id.stopTrackingButton)
+
+        // Initialize the tracked flights button
+        trackedFlightsButton = findViewById(R.id.trackedFlightsButton)
+
+        // Set up navigation to the Tracked Flights page
+        trackedFlightsButton.setOnClickListener {
+            val intent = Intent(this, TrackedFlightsActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_REORDER_TO_FRONT
+            }
+            startActivity(intent)  // Navigate to the tracked flights page
         }
 
-        // Initialize views
-        val radiusInput = findViewById<EditText>(R.id.radiusInput)
-        val applyRadiusButton = findViewById<Button>(R.id.applyRadiusButton)
-        // Set OnClickListener for the Apply Radius button
-        applyRadiusButton.setOnClickListener {
-            val radiusText = radiusInput.text.toString()
-            if (radiusText.isNotEmpty()) {
-                try {
-                    val radius = radiusText.toDouble()  // Convert to double
-                    getCurrentLocation(radius,cronetEngine)  // Call location function with radius
-                } catch (e: NumberFormatException) {
-                    Toast.makeText(this, "Please enter a valid number", Toast.LENGTH_SHORT).show()
+
+        // Initialize and register the BroadcastReceiver
+        initializeBroadcastReceiver()
+
+        // Start tracking planes when the button is clicked
+        startTrackingButton.setOnClickListener {
+            if (checkPermissions()) {
+                startTrackingService()
+            } else {
+                requestPermissions()
+            }
+        }
+
+        // Stop tracking planes when the button is clicked
+        stopTrackingButton.setOnClickListener {
+            stopTrackingService()
+        }
+
+        // Request necessary permissions on app launch
+        requestPermissions()
+    }
+
+    private fun initializeBroadcastReceiver() {
+        planeUpdateReceiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context, intent: Intent) {
+                val planesInfo = intent.getStringExtra("planesInfo")
+                println("Broadcast received with planesInfo: $planesInfo")
+                if (planesInfo != null) {
+                    showBottomSheet(planesInfo)  // Display the plane info
+                } else {
+                    println("Received broadcast but no plane info found.")
                 }
-            } else {
-                Toast.makeText(this, "Radius cannot be empty", Toast.LENGTH_SHORT).show()
             }
         }
+
+        // Register the receiver with LocalBroadcastManager
+        val filter = IntentFilter(PLANE_UPDATE_ACTION)
+        LocalBroadcastManager.getInstance(this).registerReceiver(planeUpdateReceiver, filter)
     }
-    private fun requestLocationPermission() {
-        requestPermissionsLauncher.launch(Manifest.permission.ACCESS_FINE_LOCATION)
-    }
+    private var dialog: BottomSheetDialog? = null  // Maintain a single instance
 
-    private val requestPermissionsLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestPermission()
-    ) { isGranted: Boolean ->
-        if (isGranted) {
-        }
-        else {
-            Toast.makeText(this, "Location permission denied", Toast.LENGTH_SHORT).show()
-        }
-    }
+    private fun showBottomSheet(planesInfo: String) {
+        // Dismiss the existing dialog safely
+        dialog?.let { if (it.isShowing) it.dismiss() }
 
-    private fun getCurrentLocation(radiusInMiles: Double, cronetEngine: CronetEngine) {
-        if (ActivityCompat.checkSelfPermission(
-                this, Manifest.permission.ACCESS_FINE_LOCATION
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            requestLocationPermission()
-            return  // Stop further execution if permission isn't granted
-        }
+        // Inflate the bottom sheet layout
+        val bottomSheetView = layoutInflater.inflate(R.layout.bottom_sheet_planes, null)
 
-        fusedLocationClient.lastLocation.addOnSuccessListener { location ->
-            if (location != null) {
-                val latitude = location.latitude
-                val longitude = location.longitude
-                Toast.makeText(this, "Lat: $latitude, Lon: $longitude", Toast.LENGTH_LONG).show()
+        // Create a new BottomSheetDialog and assign it to the `dialog` property
+        val newDialog = BottomSheetDialog(this, R.style.NoDimBottomSheetDialogTheme).apply {
+            setContentView(bottomSheetView)
 
-                val openskyURL = buildOpenSkyUrl(latitude, longitude, radiusInMiles,cronetEngine)
-                println(latitude)
-                println(longitude)
-                println(openskyURL)
-            } else {
-                Toast.makeText(this, "Failed to get location", Toast.LENGTH_SHORT).show()
+            // Allow dismissal on outside touch by default
+            setCanceledOnTouchOutside(true)
+
+            window?.setDimAmount(0f)  // Disable dimming
+
+            // Populate the TextView with the plane info
+            val textView = bottomSheetView.findViewById<TextView>(R.id.planesInfo)
+            textView.text = buildPlaneDisplayText(planesInfo)
+
+            // Handle clicks outside the bottom sheet content to dismiss the dialog
+            bottomSheetView.setOnClickListener {
+                // No action here, prevent accidental dismissal while interacting with content
             }
+
+            findViewById<View>(com.google.android.material.R.id.design_bottom_sheet)?.setOnClickListener {
+                // No-op: Ensures clicks inside the bottom sheet content aren't dismissed
+            }
+
+            // Set a touch listener on the background to dismiss the dialog when clicked outside
+            setOnCancelListener { dismiss() }
         }
+
+        // Assign the new dialog to the `dialog` property and show it
+        dialog = newDialog
+        newDialog.show()
     }
 
-    private fun buildOpenSkyUrl(lat: Double, lon: Double, radiusInMiles: Double, cronetEngine: CronetEngine): String {
-        // Constants for latitude and longitude conversion
-        val MILES_PER_LATITUDE_DEGREE = 69.0  // 1 degree of latitude = ~69 miles
-        val MILES_PER_LONGITUDE_DEGREE_AT_EQUATOR = 69.0  // At equator, 1 degree = ~69 miles
-
-        // Calculate the latitude offset
-        val latOffset = radiusInMiles / MILES_PER_LATITUDE_DEGREE
-
-        // Calculate the longitude offset (adjusted for the current latitude)
-        val milesPerLongitudeDegree = MILES_PER_LONGITUDE_DEGREE_AT_EQUATOR * Math.cos(Math.toRadians(lat))
-        val lonOffset = radiusInMiles / milesPerLongitudeDegree
-
-        // Build the bounding box based on the offsets
-        val lamin = lat - latOffset
-        val lamax = lat + latOffset
-        val lomin = lon - lonOffset
-        val lomax = lon + lonOffset
-
-        val formattedURL = "https://opensky-network.org/api/states/all?lamin=$lamin&lomin=$lomin&lamax=$lamax&lomax=$lomax"
-
-        // Gets a handle to the clipboard service.
-        val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-        val clip: ClipData = ClipData.newPlainText("simple text", formattedURL)
-        // Set the clipboard's primary clip.
-        clipboard.setPrimaryClip(clip)
-
-        val executor: Executor = Executors.newSingleThreadExecutor()
-        val requestBuilder = cronetEngine.newUrlRequestBuilder(
-            formattedURL,
-            MyUrlRequestCallback(this,lat,lon),
-            executor
-        )
-        val request: UrlRequest = requestBuilder.build()
-        request.start()
 
 
-        // Return the formatted API URL
-        return formattedURL
-    }
-}
-private const val TAG = "MyUrlRequestCallback"
-
-class MyUrlRequestCallback(private val context: Context, private val userLat: Double, private val userLon: Double) : UrlRequest.Callback() {
-    private val responseBody = StringBuilder()
-    override fun onRedirectReceived(request: UrlRequest?, info: UrlResponseInfo?, newLocationUrl: String?) {
-        println( "onRedirectReceived method called.")
-        // You should call the request.followRedirect() method to continue
-        // processing the request.
-        request?.followRedirect()
-    }
-
-    override fun onResponseStarted(request: UrlRequest?, info: UrlResponseInfo?) {
-        println("onResponseStarted method called.")
-        // You should call the request.read() method before the request can be
-        // further processed. The following instruction provides a ByteBuffer object
-        // with a capacity of 102400 bytes for the read() method. The same buffer
-        // with data is passed to the onReadCompleted() method.
-        request?.read(ByteBuffer.allocateDirect(102400))
-    }
-
-    override fun onReadCompleted(
-        request: UrlRequest,
-        info: UrlResponseInfo,
-        byteBuffer: ByteBuffer?
-    ) {
-        byteBuffer?.let { buffer ->
-            buffer.flip() // Switch buffer to read mode
-
-            // Read the data from the buffer
-            val bytes = ByteArray(buffer.remaining())
-            buffer.get(bytes)  // Copy the buffer content into the byte array
-
-            // Append the data to the responseBody (assuming responseBody is a class-level variable)
-            responseBody.append(String(bytes, Charset.forName("UTF-8")))
-
-            println("Read completed: ${bytes.size} bytes")
-
-            buffer.clear()  // Clear the buffer for the next read
-            request.read(buffer)  // Continue reading the response
-        } ?: run {
-            println("ByteBuffer is null.")
-        }
-    }
-
-    override fun onSucceeded(request: UrlRequest?, info: UrlResponseInfo?) {
-        println("onSucceeded method called.")
+    private fun buildPlaneDisplayText(planesInfo: String): String {
+        val stringBuilder = StringBuilder()
 
         try {
-            // Parse the response body into a JSONObject
-            val jsonResponse = JSONObject(responseBody.toString())
-            println("Parsed JSON: $jsonResponse")
+            // Parse the JSON string into a JSONArray
+            val planesArray = JSONArray(planesInfo)
 
-            // Extract the 'states' array from the JSONObject
-            val respArray = jsonResponse.optJSONArray("states")
+            for (i in 0 until planesArray.length()) {
+                val planeObject = planesArray.getJSONObject(i)
 
-            if (respArray != null) {
-                val handler = Handler(Looper.getMainLooper())  // Create a Handler for the main UI thread
-                var delay = 0L  // Start with 0ms delay
-                // Iterate through the outer array
-                for (i in 0 until respArray.length()) {
+                // Extract relevant information
+                val callSign = planeObject.optString("callsign", "No Call Sign").trim()
+                val distance = String.format("%.2f", planeObject.optDouble("distance_in_miles", 0.0))
+                val altitude = planeObject.optInt("geo_altitude", 0)
+                val velocity = planeObject.optInt("velocity", 0)
+                val vrate = planeObject.optInt("vertical_rate", 0)
 
-                    val innerArray = respArray.getJSONArray(i)  // Get each inner array
-                    var callSign = innerArray.get(1) as String
-                    callSign = callSign.trim()
-                    if (callSign.isEmpty()) {
-                        callSign = "No Call Sign"
-                    }
-
-                    val planeLat = innerArray.get(6) as Double
-                    val planeLon = innerArray.get(5) as Double
-
-                    var planeDistance = haversine(userLat,userLon,planeLat,planeLon)
-                    planeDistance = String.format("%.2f", planeDistance).toDouble()
-                    val iAdjusted = i+1
-                    val msg = "Aircraft $iAdjusted: $callSign, Distance: $planeDistance" + "km"
-                    // Schedule the Toast to show with a 1-second interval between each
-                    handler.postDelayed({
-                        Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
-                    }, delay)
-
-                    delay += 1000  // Increment the delay by 1 second (1000 ms) for each Toast
-
-                    println(msg)
-
-                }
-            } else {
-                println("No 'states' array found in the JSON response.")
+                // Build the formatted text for each plane
+                stringBuilder.append("Plane ${i + 1}: $callSign\nDistance (in miles): $distance\nAltitude: $altitude\nVelocity: $velocity\nVertical Change Rate: $vrate\n\n")
             }
         } catch (e: Exception) {
-            println("Failed to parse JSON: ${e.message}")
+            // Handle JSON parsing exceptions
+            stringBuilder.append("Error parsing plane data: ${e.message}")
+        }
+
+        return stringBuilder.toString()
+    }
+
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Unregister the receiver with LocalBroadcastManager
+        LocalBroadcastManager.getInstance(this).unregisterReceiver(planeUpdateReceiver)
+    }
+
+    private fun requestPermissions() {
+        val locationPermissions = arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
+
+        if (locationPermissions.any {
+                ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+            }
+        ) {
+            ActivityCompat.requestPermissions(
+                this, locationPermissions, LOCATION_PERMISSION_REQUEST_CODE
+            )
+        }
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(
+                    this, Manifest.permission.POST_NOTIFICATIONS
+                ) != PackageManager.PERMISSION_GRANTED
+            ) {
+                ActivityCompat.requestPermissions(
+                    this, arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                    NOTIFICATION_PERMISSION_REQUEST_CODE
+                )
+            }
         }
     }
-    // Called if the request fails.
-    override fun onFailed(
-        request: UrlRequest,
-        info: UrlResponseInfo,
-        error: CronetException
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int, permissions: Array<out String>, grantResults: IntArray
     ) {
-        println("Request failed: ${error.message}")
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        if (requestCode == LOCATION_PERMISSION_REQUEST_CODE) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Location permission granted", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Location permission denied", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+        if (requestCode == NOTIFICATION_PERMISSION_REQUEST_CODE) {
+            if (grantResults.isNotEmpty() && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Notification permission granted", Toast.LENGTH_SHORT).show()
+            } else {
+                Toast.makeText(this, "Notification permission denied", Toast.LENGTH_SHORT).show()
+            }
+        }
     }
 
-    fun haversine(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
-        val R = 6371.0  // Earth's radius in kilometers
+    private fun checkPermissions(): Boolean {
+        val locationPermissions = arrayOf(
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
+        )
 
-        val dLat = Math.toRadians(lat2 - lat1)
-        val dLon = Math.toRadians(lon2 - lon1)
+        val allGranted = locationPermissions.all {
+            ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
+        }
 
-        val a = sin(dLat / 2).pow(2) +
-                cos(Math.toRadians(lat1)) * cos(Math.toRadians(lat2)) *
-                sin(dLon / 2).pow(2)
+        if (!allGranted) {
+            Toast.makeText(this, "Please grant location permissions", Toast.LENGTH_SHORT).show()
+        }
 
-        val c = 2 * atan2(sqrt(a), sqrt(1 - a))
+        return allGranted
+    }
 
-        return R * c  // Distance in kilometers
+
+    private fun startTrackingService() {
+        if (checkPermissions()) {
+            fusedLocationClient.lastLocation.addOnSuccessListener { location ->
+                if (location != null) {
+                    val latitude = location.latitude
+                    val longitude = location.longitude
+
+                    val radiusText = radiusInput.text.toString()
+                    val radius = radiusText.toDoubleOrNull() ?: 25.0
+
+                    val intent = Intent(this, PlaneTrackingService::class.java).apply {
+                        putExtra("latitude", latitude)
+                        putExtra("longitude", longitude)
+                        putExtra("radius", radius)
+                    }
+
+                    startForegroundService(intent)  // Start the foreground service
+                    Toast.makeText(this, "Started tracking planes", Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, "Failed to get location", Toast.LENGTH_SHORT).show()
+                }
+            }.addOnFailureListener { exception ->
+                Toast.makeText(this, "Error retrieving location: ${exception.message}", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            requestPermissions()  // Request permissions if not granted
+        }
+    }
+
+
+    private fun stopTrackingService() {
+        val intent = Intent(this, PlaneTrackingService::class.java)
+        stopService(intent)  // Stop the service
+        Toast.makeText(this, "Stopped tracking planes", Toast.LENGTH_SHORT).show()
     }
 }

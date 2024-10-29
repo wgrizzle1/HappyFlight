@@ -13,4 +13,14 @@
         <item name="android:statusBarColor">?attr/colorPrimaryVariant</item>
         <!-- Customize your theme here. -->
     </style>
+
+    <style name="NoDimBottomSheetDialogTheme" parent="Theme.Design.Light.BottomSheetDialog">
+        <item name="bottomSheetStyle">@style/NoDimBottomSheetStyle</item>
+    </style>
+
+    <style name="NoDimBottomSheetStyle" parent="Widget.Design.BottomSheet.Modal">
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:background">@android:color/white</item>
+    </style>
 </resources>
