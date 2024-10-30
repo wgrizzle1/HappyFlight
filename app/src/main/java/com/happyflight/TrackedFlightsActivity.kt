@@ -17,19 +17,40 @@ class TrackedFlightsActivity : AppCompatActivity() {
 
     private val flightUpdateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) {
-            val receivedFlights = intent.getParcelableArrayListExtra<Flight>("trackedFlights")
-            if (receivedFlights != null) {
-                trackedFlights.clear()
-                trackedFlights.addAll(receivedFlights)
-                flightAdapter.notifyDataSetChanged()
-                println("TrackedFlightsActivity updated with ${trackedFlights.size} flights")
-            } else {
-                println("No flights received in the broadcast.")
+            val planesInfoString = intent.getStringExtra("planesInfo")
+            println("Received planesInfo: $planesInfoString")
+
+            if (planesInfoString != null) {
+                try {
+                    val planesArray = JSONArray(planesInfoString)
+                    val updatedFlights = mutableListOf<Flight>()
+
+                    for (i in 0 until planesArray.length()) {
+                        val flightJson = planesArray.getJSONObject(i)
+                        val flight = Flight(
+                            callSign = flightJson.getString("callSign"),
+                            isLanded = flightJson.getBoolean("isLanded"),
+                            latitude = flightJson.getDouble("latitude"),
+                            longitude = flightJson.getDouble("longitude"),
+                            distanceInMiles = flightJson.getDouble("distanceInMiles"),
+                            altitude = flightJson.getInt("altitude"),
+                            velocity = flightJson.getInt("velocity"),
+                            verticalRate = flightJson.getInt("verticalRate")
+                        )
+                        updatedFlights.add(flight)
+                    }
+
+                    trackedFlights.clear()
+                    trackedFlights.addAll(updatedFlights)
+                    flightAdapter.notifyDataSetChanged()
+
+                } catch (e: Exception) {
+                    println("Error parsing planesInfo: ${e.message}")
+                }
             }
         }
-
-
     }
+
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -46,6 +67,7 @@ class TrackedFlightsActivity : AppCompatActivity() {
 
         println("TrackedFlightsActivity created and receiver is registered")
     }
+
 
 
     override fun onDestroy() {

@@ -21,7 +21,9 @@ import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.Executors
 import org.json.JSONArray
-import com.happyflight.Flight
+import org.json.JSONObject
+
+
 
 class PlaneTrackingService : Service() {
 
@@ -151,6 +153,8 @@ class PlaneTrackingService : Service() {
 
             for (i in 0 until planesArray.length()) {
                 val planeObject = planesArray.getJSONObject(i)
+
+                // Extract flight data
                 val flight = Flight(
                     callSign = planeObject.optString("callsign", "No Call Sign").trim(),
                     isLanded = planeObject.optBoolean("on_ground", false),
@@ -161,18 +165,21 @@ class PlaneTrackingService : Service() {
                     velocity = planeObject.optInt("velocity", 0),
                     verticalRate = planeObject.optInt("vertical_rate", 0)
                 )
+
                 trackedFlights.add(flight)
             }
 
-            // **Call the broadcast here:**
-            broadcastTrackedFlights(trackedFlights)
+            // **Broadcast the flights to TrackedFlightsActivity**
+            broadcastFlightUpdates(this,trackedFlights)
 
+            // **Update the notification with the new flight count**
             updateNotification(trackedFlights.size)
 
         } catch (e: Exception) {
             println("Error parsing plane data: ${e.message}")
         }
     }
+
 
 
     private fun updateNotification(planesCount: Int) {
@@ -188,15 +195,35 @@ class PlaneTrackingService : Service() {
     }
 
 
-    private fun broadcastTrackedFlights(trackedFlights: List<Flight>) {
-        val intent = Intent(MainActivity.TRACKED_FLIGHTS_UPDATE_ACTION).apply {
-            putParcelableArrayListExtra("trackedFlights", ArrayList(trackedFlights))
-        }
-        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
-        println("Broadcast sent with ${trackedFlights.size} flights")
+    fun broadcastFlightUpdates(context: Context, flights: List<Flight>) {
+        val intent = Intent(MainActivity.TRACKED_FLIGHTS_UPDATE_ACTION)
+        val planesInfoJsonString = convertFlightsToJson(flights)
+        println("Broadcasting planesInfo: $planesInfoJsonString")
+
+        intent.putExtra("planesInfo", planesInfoJsonString)
+
+        LocalBroadcastManager.getInstance(context).sendBroadcast(intent)
     }
 
+    fun convertFlightsToJson(flights: List<Flight>): String {
+        val jsonArray = JSONArray()
 
+        flights.forEach { flight ->
+            val jsonObject = JSONObject().apply {
+                put("callSign", flight.callSign)
+                put("isLanded", flight.isLanded)
+                put("latitude", flight.latitude)
+                put("longitude", flight.longitude)
+                put("distanceInMiles", flight.distanceInMiles)
+                put("altitude", flight.altitude)
+                put("velocity", flight.velocity)
+                put("verticalRate", flight.verticalRate)
+            }
+            jsonArray.put(jsonObject)
+        }
+
+        return jsonArray.toString()
+    }
 
 
 

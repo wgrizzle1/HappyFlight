@@ -36,7 +36,7 @@ class MainActivity : AppCompatActivity() {
     companion object {
         const val LOCATION_PERMISSION_REQUEST_CODE = 1
         const val NOTIFICATION_PERMISSION_REQUEST_CODE = 2
-        const val PLANE_UPDATE_ACTION = "com.happyflight.PLANE_UPDATE" // Ensure consistency here
+        const val PLANE_UPDATE_ACTION = "com.happyflight.PLANE_UPDATE"
         const val TRACKED_FLIGHTS_UPDATE_ACTION = "com.happyflight.TRACKED_FLIGHTS_UPDATE"
 
     }

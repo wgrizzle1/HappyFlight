@@ -31,4 +31,5 @@ class FlightAdapter(private val context: Context, private val flights: List<Flig
 
         return view
     }
+
 }
