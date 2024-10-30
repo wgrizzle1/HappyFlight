@@ -147,51 +147,27 @@ class PlaneTrackingService : Service() {
     private fun handlePlaneData(planesInfo: String) {
         try {
             val planesArray = JSONArray(planesInfo)
-            val newTrackedFlights = mutableListOf<Flight>()  // Temporary list for new data
+            val trackedFlights = mutableListOf<Flight>()
 
             for (i in 0 until planesArray.length()) {
                 val planeObject = planesArray.getJSONObject(i)
-
-                // Extract flight data
-                val callSign = planeObject.optString("callsign", "No Call Sign").trim()
-                val isLanded = planeObject.optBoolean("on_ground", false)
-                val latitude = planeObject.optDouble("latitude", 0.0)
-                val longitude = planeObject.optDouble("longitude", 0.0)
-                val distanceInMiles = planeObject.optDouble("distance_in_miles", 0.0)
-                val altitude = planeObject.optInt("geo_altitude", 0)
-                val velocity = planeObject.optInt("velocity", 0)
-                val verticalRate = planeObject.optInt("vertical_rate", 0)
-
-                // Create a new Flight object
                 val flight = Flight(
-                    callSign = callSign,
-                    isLanded = isLanded,
-                    latitude = latitude,
-                    longitude = longitude,
-                    distanceInMiles = distanceInMiles,
-                    altitude = altitude,
-                    velocity = velocity,
-                    verticalRate = verticalRate
+                    callSign = planeObject.optString("callsign", "No Call Sign").trim(),
+                    isLanded = planeObject.optBoolean("on_ground", false),
+                    latitude = planeObject.optDouble("latitude", 0.0),
+                    longitude = planeObject.optDouble("longitude", 0.0),
+                    distanceInMiles = planeObject.optDouble("distance_in_miles", 0.0),
+                    altitude = planeObject.optInt("geo_altitude", 0),
+                    velocity = planeObject.optInt("velocity", 0),
+                    verticalRate = planeObject.optInt("vertical_rate", 0)
                 )
-
-                newTrackedFlights.add(flight)  // Add to the new list
+                trackedFlights.add(flight)
             }
 
-            // Update the tracked flights list
-            trackedFlights.clear()
-            trackedFlights.addAll(newTrackedFlights)
+            // **Call the broadcast here:**
+            broadcastTrackedFlights(trackedFlights)
 
-            // **Send the broadcast** with the updated tracked flights
-            broadcastTrackedFlights()
-
-            // Update the notification with the new count and time
-            val notification = buildNotification(
-                content = "Tracking planes...",
-                planesCount = trackedFlights.size,
-                lastUpdate = getCurrentTime()
-            )
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.notify(NOTIFICATION_ID, notification)
+            updateNotification(trackedFlights.size)
 
         } catch (e: Exception) {
             println("Error parsing plane data: ${e.message}")
@@ -199,12 +175,27 @@ class PlaneTrackingService : Service() {
     }
 
 
+    private fun updateNotification(planesCount: Int) {
+        val lastUpdateTime = getCurrentTime()
+        val notification = buildNotification(
+            content = "Tracking planes...",
+            planesCount = planesCount,
+            lastUpdate = lastUpdateTime
+        )
 
-    private fun broadcastTrackedFlights() {
-        val intent = Intent(MainActivity.TRACKED_FLIGHTS_UPDATE_ACTION)
-        intent.putParcelableArrayListExtra("trackedFlights", ArrayList(trackedFlights))
-        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.notify(NOTIFICATION_ID, notification)
     }
+
+
+    private fun broadcastTrackedFlights(trackedFlights: List<Flight>) {
+        val intent = Intent(MainActivity.TRACKED_FLIGHTS_UPDATE_ACTION).apply {
+            putParcelableArrayListExtra("trackedFlights", ArrayList(trackedFlights))
+        }
+        LocalBroadcastManager.getInstance(this).sendBroadcast(intent)
+        println("Broadcast sent with ${trackedFlights.size} flights")
+    }
+
 
 
 
